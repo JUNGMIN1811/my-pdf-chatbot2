@@ -13,8 +13,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
 const PORT = process.env.PORT || 3001
 
-// Plan SC: FR-06 — API 키는 서버에서만 처리
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+// Plan SC: FR-06 — API 키는 서버에서만 처리 (SambaNova API)
+const openai = new OpenAI({
+  apiKey: process.env.SAMBANOVA_API_KEY,
+  baseURL: 'https://api.sambanova.ai/v1',
+})
 
 app.use(cors())
 app.use(express.json())
@@ -68,12 +71,26 @@ app.post('/api/chat', async (req, res) => {
 
   try {
     // Design Ref: §4.3 — 시스템 프롬프트에 PDF 텍스트 주입
-    const systemPrompt = pdfText
-      ? `당신은 노무 전문 어시스턴트입니다.\n아래 근로기준법 내용을 참고하여 질문에 답변하세요.\n법령 조항을 근거로 제시하고, 모르는 내용은 모른다고 답하세요.\n\n[PDF 내용]\n${pdfText.slice(0, 12000)}`
-      : '당신은 노무 전문 어시스턴트입니다. 근로기준법 등 노무 관련 질문에 성실히 답변하세요.'
+    const pdfSection = pdfText
+      ? `\n\n[참고 법령 원문]\n${pdfText.slice(0, 12000)}`
+      : ''
+
+    const systemPrompt = `당신은 노무 전문 FAQ 어시스턴트입니다.
+아래 지침에 따라 질문에 답변하십시오.
+
+[답변 구조 — 반드시 아래 4개 항목을 순서대로 작성]
+1. **결론**: 질문에 대한 핵심 답변을 한 문장으로 제시합니다.
+2. **근거**: 관련 법령 조항을 직접 인용합니다. (예: 근로기준법 제○조 ○항)
+3. **상세 설명**: 조건, 예외, 계산 방법 등을 항목별 bullet(•)로 서술합니다.
+4. **유의사항**: 혼동하기 쉬운 부분이나 자주 발생하는 오해를 안내합니다.
+
+[말투] 격식체를 사용합니다. (~입니다, ~합니다, ~됩니다)
+[형식] 항목별 bullet(•) 사용, 핵심 수치·기간·금액은 **굵게** 표시합니다.
+[길이] 각 항목을 충분히 상세하게 작성합니다. 내용이 많을수록 좋습니다.
+[원칙] 참고 법령 원문에 근거가 있으면 반드시 인용하고, 없으면 일반 노무 지식을 바탕으로 답변하되 "법령 원문에서 확인되지 않은 내용입니다"라고 명시합니다.${pdfSection}`
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: process.env.HF_MODEL || 'Meta-Llama-3.3-70B-Instruct',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: message },
@@ -85,7 +102,7 @@ app.post('/api/chat', async (req, res) => {
     const reply = completion.choices[0]?.message?.content || '답변을 생성할 수 없습니다.'
     res.json({ reply })
   } catch (err) {
-    console.error('OpenAI API 오류:', err.message)
+    console.error('SambaNova API 오류:', err.message)
     res.status(500).json({ error: '서버 오류가 발생했습니다.' })
   }
 })
